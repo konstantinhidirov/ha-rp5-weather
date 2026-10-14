@@ -90,6 +90,9 @@ HTTP 200 с пустым телом именно у endpoint поиска соо
 Код: `custom_components/rp5_weather`. Тесты: `tests`. Архитектура и порядок релиза: [docs/development.md](docs/development.md).
 История версий: [CHANGELOG.md](CHANGELOG.md). Лицензия: [MIT](LICENSE).
 
+Push тега `v<manifest.version>` запускает hassfest и тесты, затем автоматически публикует GitHub Release
+с архивом `rp5_weather.zip`. Для появления нового релиза в HACS используй «Обновить информацию».
+
 CI запускает HACS validation, hassfest и 41 тест в контейнере HA Core 2026.10.1.
 Официальная проверка HACS требует описание репозитория, включённые issues и topics на GitHub;
 рекомендуемые topics: `home-assistant`, `hacs`, `weather`, `rp5`, `custom-integration`.
