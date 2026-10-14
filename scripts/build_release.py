@@ -20,7 +20,7 @@ def main():
         for path in sorted(source.rglob('*')):
             if not path.is_file() or '__pycache__' in path.parts:
                 continue
-            if path.suffix not in {'.py', '.json', '.png'}:
+            if path.suffix not in {'.py', '.json', '.png'} and path.name != 'LICENSE':
                 continue
             archive.write(path, path.relative_to(source))
     print(f'Архив версии {manifest["version"]}: {output}')
