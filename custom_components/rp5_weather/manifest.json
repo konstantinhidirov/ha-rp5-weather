@@ -1,0 +1,14 @@
+{
+  "domain": "rp5_weather",
+  "name": "RP5 Weather",
+  "codeowners": [
+    "@konstantinhidirov"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/konstantinhidirov/ha-rp5-weather",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/konstantinhidirov/ha-rp5-weather/issues",
+  "requirements": [],
+  "version": "0.1.3"
+}

@@ -1,0 +1,38 @@
+name: Проверки интеграции
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hassfest:
+    name: Manifest и переводы HA
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    name: Требования HACS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: hacs/action@main
+        with:
+          category: integration
+          comment: false
+
+  tests:
+    name: Тесты на HA Core 2026.10.1
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Парсер, осадки, поиск и форма
+        run: >-
+          docker run --rm --entrypoint python
+          -v "$GITHUB_WORKSPACE:/repo:ro" -w /repo
+          ghcr.io/home-assistant/home-assistant:2026.10.1
+          -m unittest discover -s tests -v

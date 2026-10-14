@@ -1,0 +1,51 @@
+{
+  "title": "RP5 Weather",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Find a place on RP5",
+        "description": "Enter a city or settlement name (2–100 characters), then select a place. You can also paste the full URL of a Russian-language RP5 forecast page.",
+        "data": {
+          "query": "City or settlement"
+        }
+      },
+      "reconfigure": {
+        "title": "Page address for the same location",
+        "data": {
+          "url": "Location URL on RP5"
+        }
+      },
+      "select_location": {
+        "title": "Select a place",
+        "description": "Results for “{query}”. Check the country, region and weather station. Choose “Искать другое название…” to search again.",
+        "data": {
+          "location": "Forecast location"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not fetch or parse RP5 weather data.",
+      "invalid_url": "Enter the full Russian-language /Погода_... page URL on rp5.ru or m.rp5.ru.",
+      "different_location": "Add a separate integration entry for another location.",
+      "cannot_search": "Could not search RP5. Try again or paste the location page URL.",
+      "invalid_query": "Enter a location name between 2 and 100 characters.",
+      "no_results": "No matching places. Check the name or paste the location page URL.",
+      "invalid_location": "Choose a location from the search results."
+    },
+    "abort": {
+      "already_configured": "This location is already configured.",
+      "reconfigure_successful": "The location URL was updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "RP5 polling",
+        "description": "Each refresh makes three HTTP requests. RP5 updates its forecast several times a day.",
+        "data": {
+          "update_interval": "Polling interval, minutes (60–720)"
+        }
+      }
+    }
+  }
+}

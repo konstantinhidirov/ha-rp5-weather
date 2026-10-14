@@ -1,0 +1,6 @@
+{
+  "name": "RP5 Weather",
+  "homeassistant": "2026.10.1",
+  "zip_release": true,
+  "filename": "rp5_weather.zip"
+}
