@@ -37,7 +37,7 @@ Referer страницы места обязателен: без него наб
 2. Запусти тесты, отправь один и тот же коммит в main обеих реп.
 3. Дождись успешных проверок GitHub HACS, hassfest и тестов.
 4. Создай tag `v<version>` на проверенном коммите и отправь его в обе репы.
-5. Публикация GitHub Release запускает workflow упаковки `rp5_weather.zip`.
+5. Push тега запускает workflow: hassfest, тесты, упаковка и публикация GitHub Release с `rp5_weather.zip`.
 6. Дождись появления архива в релизе; затем HACS → Обновить информацию → обновить и перезапустить HA.
 7. Проверь loaded, прежние сущности, timestamp, weather.get_forecasts hourly и ошибки RP5.
 

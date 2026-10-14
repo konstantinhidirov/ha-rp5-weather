@@ -1,8 +1,9 @@
 name: Архив релиза
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "v*"
 
 permissions:
   contents: write
@@ -12,14 +13,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.release.tag_name }}
+      - name: Проверить manifest и переводы
+        uses: home-assistant/actions/hassfest@master
+      - name: Проверить код на HA Core 2026.10.1
+        run: >-
+          docker run --rm --entrypoint python
+          -v "$GITHUB_WORKSPACE:/repo:ro" -w /repo
+          ghcr.io/home-assistant/home-assistant:2026.10.1
+          -m unittest discover -s tests -v
       - name: Проверить версию и собрать архив
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: python3 scripts/build_release.py --tag "$RELEASE_TAG"
-      - name: Прикрепить архив
+      - name: Опубликовать релиз с архивом
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: gh release upload "$RELEASE_TAG" dist/rp5_weather.zip --repo "$GITHUB_REPOSITORY"
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: >-
+          gh release create "$RELEASE_TAG" dist/rp5_weather.zip
+          --repo "$GITHUB_REPOSITORY" --verify-tag
+          --title "RP5 Weather $RELEASE_TAG" --notes-file CHANGELOG.md
