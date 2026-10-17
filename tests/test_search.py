@@ -15,7 +15,7 @@ search = importlib.import_module('rp5_search_tests.search')
 
 class SearchTests(unittest.IsolatedAsyncioTestCase):
     def test_real_results_keep_region_and_airport(self):
-        source = (Path(__file__).parent / 'fixtures/search-astrakhan.json').read_text()
+        source = (Path(__file__).parent / 'fixtures/search-astrakhan.json').read_text(encoding='utf-8')
         results = search.parse_search(source)
         self.assertEqual(len(results), 3)
         self.assertIn('Кировская область', results[1]['label'])

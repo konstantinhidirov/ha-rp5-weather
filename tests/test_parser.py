@@ -14,23 +14,68 @@ spec.loader.exec_module(p)
 NOW = datetime(2026, 12, 31, 18, 30, tzinfo=timezone.utc)
 
 
-def fixture():
-    rows = ['<tr class="forecastDate"><td colspan="2">31 декабря</td><td colspan="12">1 января</td></tr>']
+def fixture(hours=None, date_spans=None):
+    hours = hours if hours is not None else ['23'] + [f'{h:02}' for h in range(11)]
+    date_spans = date_spans or [(2, '31 декабря'), (12, '1 января')]
+    rows = ['<tr class="forecastDate">' + ''.join(
+        f'<td colspan="{span}">{date}</td>' for span, date in date_spans) + '</tr>']
     def row(cls, cells):
         rows.append(f'<tr class="{cls}"><td class="title">Label</td>' + ''.join(f'<td class="n2">{x}</td>' for x in cells) + '<td class="title">Label</td></tr>')
-    row('forecastTime', ['23'] + [f'{h:02}' for h in range(11)])
+    row('forecastTime', hours)
     for cls, unit, value in [('temperature-row', 't_0', '−5'), ('feel-temp-row', 't_0', '-8'),
                               ('pressure-row', 'p_3', '1024'), ('wind-velocity-row', 'wv_0', '4'),
                               ('wind-gusts-row', 'wv_0', '7')]:
-        row(cls, [f'<div class="{unit}">{value}</div><div class="t_1" style="display:none">999</div>'] * 12)
-    row('wind-direction-row', ['Ю-В'] * 12)
-    row('humidity-row', ['76'] * 12)
-    row('cloud-cover-row', ['<div class="cc_0"><div onclick="tooltip(this, \'Ясно\', \'hint\')"></div></div>'] * 12)
-    row('precipitation-row', ['<div class="pr_0" onclick="tooltip(this, \'Явления погоды отсутствуют\', \'hint\')"><div class="wp_0"></div></div>'] * 12)
+        row(cls, [f'<div class="{unit}">{value}</div><div class="t_1" style="display:none">999</div>'] * len(hours))
+    row('wind-direction-row', ['Ю-В'] * len(hours))
+    row('humidity-row', ['76'] * len(hours))
+    row('cloud-cover-row', ['<div class="cc_0"><div onclick="tooltip(this, \'Ясно\', \'hint\')"></div></div>'] * len(hours))
+    row('precipitation-row', ['<div class="pr_0" onclick="tooltip(this, \'Явления погоды отсутствуют\', \'hint\')"><div class="wp_0"></div></div>'] * len(hours))
     return '<table>' + ''.join(rows) + '</table>'
 
 
 class ParserTests(unittest.TestCase):
+    def test_late_night_penultimate_span_from_live_response(self):
+        # Structural reproduction of RP5's 2026-10-16 23:57 UTC-4 response.
+        # The right title was counted on Oct 22, although Oct 23 follows it.
+        hours = list(range(24)) * 2 + list(range(21)) + [23]
+        hours += [2, 5, 8, 11, 14, 17, 20, 23] * 3 + [2, 5, 8]
+        spans = [(25, '17 октября'), (24, '18 октября'), (22, '19 октября'),
+                 (8, '20 октября'), (8, '21 октября'), (9, '22 октября'), (3, '23 октября')]
+        now = datetime(2026, 10, 17, 3, 57, tzinfo=timezone.utc)
+        parsed = p.parse_forecast(fixture(hours, spans), -14400, now)
+        self.assertEqual(len(parsed), 97)
+        self.assertEqual(parsed[93]['datetime'], '2026-10-23T03:00:00+00:00')
+        self.assertEqual(parsed[94]['datetime'], '2026-10-23T06:00:00+00:00')
+        self.assertEqual(parsed[94]['rp5_precipitation_interval_hours'], 3)
+        # Ordinary spans must produce exactly the same weather and timestamps.
+        spans[-2:] = [(8, '22 октября'), (4, '23 октября')]
+        self.assertEqual(parsed, p.parse_forecast(fixture(hours, spans), -14400, now))
+
+    def test_duplicate_and_out_of_order_hours_rejected(self):
+        for hours in [['23', '00', '00'] + list(range(1, 10)),
+                      ['23', '00', '02', '01'] + list(range(2, 10))]:
+            with self.subTest(hours=hours), self.assertRaises(p.ParseError):
+                p.parse_forecast(fixture(hours), 14400, NOW)
+
+    def test_date_labels_and_spans_still_validated(self):
+        for spans in [[(2, '31 декабря'), (12, '2 января')],
+                      [(4, '31 декабря'), (10, '1 января')],
+                      [(2, '31 декабря'), (11, '1 января')],
+                      [('bad', '31 декабря'), (12, '1 января')],
+                      [(2, '32 декабря'), (12, '1 января')]]:
+            with self.subTest(spans=spans), self.assertRaises(p.ParseError):
+                p.parse_forecast(fixture(date_spans=spans), 14400, NOW)
+
+    def test_title_only_first_date(self):
+        hours = list(range(12))
+        parsed = p.parse_forecast(fixture(hours, [(1, '31 декабря'), (13, '1 января')]), 14400, NOW)
+        self.assertEqual(parsed[0]['datetime'], '2026-12-31T20:00:00+00:00')
+
+    def test_leap_day(self):
+        now = datetime(2028, 2, 28, 18, 30, tzinfo=timezone.utc)
+        parsed = p.parse_forecast(fixture(date_spans=[(2, '28 февраля'), (12, '29 февраля')]), 14400, now)
+        self.assertEqual(parsed[1]['datetime'], '2028-02-28T20:00:00+00:00')
+
     def test_new_year_and_units(self):
         f = p.parse_forecast(fixture(), 14400, NOW)
         self.assertEqual(len(f), 12)

@@ -50,14 +50,34 @@ class RP5Client:
             raise ParseError('RP5 returned empty or unexpected content')
         return html
 
-    async def fetch(self):
+    async def fetch(self, *, allow_partial=False):
         # Refresh metadata too: current local UTC offset can change with DST.
         page = await self._text('GET', self.url)
         meta = await asyncio.to_thread(metadata, page)
-        forecast_html = await self._tab(meta['point_id'], 2)
-        observation_html = await self._tab(meta['point_id'], 0)
+        errors = {}
+        tabs = {}
+        for name, tab in [('forecast', 2), ('observation', 0)]:
+            try:
+                tabs[name] = await self._tab(meta['point_id'], tab)
+            except (aiohttp.ClientError, TimeoutError, ParseError) as err:
+                if not allow_partial:
+                    raise
+                errors[name] = str(err) or type(err).__name__
         fetched_at = datetime.now(timezone.utc)
-        forecast = await asyncio.to_thread(parse_forecast, forecast_html, meta['offset_seconds'], fetched_at)
-        current = await asyncio.to_thread(observation, observation_html, forecast_html, meta['offset_seconds'], fetched_at)
+        forecast = []
+        current = None
+        if 'forecast' in tabs:
+            try:
+                forecast = await asyncio.to_thread(parse_forecast, tabs['forecast'], meta['offset_seconds'], fetched_at)
+            except ParseError as err:
+                if not allow_partial:
+                    raise
+                errors['forecast'] = str(err)
+        if 'observation' in tabs:
+            current = await asyncio.to_thread(observation, tabs['observation'], tabs.get('forecast', ''),
+                                              meta['offset_seconds'], fetched_at)
+        if not forecast and not current:
+            raise ParseError('RP5 has no usable forecast or observation: ' + '; '.join(errors.values()))
         return {'location': meta, 'forecast': forecast, 'observation': current,
-                'fetched_at': fetched_at.isoformat(), 'source_url': self.url}
+                'fetched_at': fetched_at.isoformat(), 'source_url': self.url,
+                'forecast_error': errors.get('forecast'), 'observation_error': errors.get('observation')}

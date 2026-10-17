@@ -190,6 +190,73 @@ def precipitation(cell, end, fallback_hours):
     }
 
 
+def forecast_times(hours, date_cells, offset_seconds, fetched_at):
+    """Match date labels to clock rollovers, not RP5's misplaced label span.
+
+    RP5 sometimes adds the right-hand title column to the penultimate date.
+    Keep checking all spans: only the two non-weather columns may be extra.
+    """
+    clocks = []
+    counts = [0]
+    for hour in hours:
+        h = number(hour.text())
+        if h is None or int(h) != h or not 0 <= h <= 23:
+            raise ParseError('Invalid forecast hour')
+        h = int(h)
+        if clocks:
+            if (h - clocks[-1]) % 24 not in {1, 3}:
+                raise ParseError('Invalid forecast hour sequence')
+            if h < clocks[-1]:
+                counts.append(0)
+        clocks.append(h)
+        counts[-1] += 1
+
+    tz = timezone(timedelta(seconds=offset_seconds))
+    local_now = fetched_at.astimezone(tz)
+    labels, spans = [], []
+    for cell in date_cells:
+        match = re.search(r'(\d{1,2})\s+(' + '|'.join(MONTHS) + r')', cell.text())
+        if not match:
+            raise ParseError('Forecast date is missing')
+        day, month = int(match.group(1)), MONTHS.index(match.group(2)) + 1
+        candidates = []
+        for year in [local_now.year - 1, local_now.year, local_now.year + 1]:
+            try:
+                candidates.append(datetime(year, month, day, tzinfo=tz))
+            except ValueError:
+                continue
+        if not candidates:
+            raise ParseError('Invalid forecast date')
+        anchor = labels[-1] if labels else local_now
+        date = min(candidates, key=lambda x: abs((x - anchor).total_seconds()))
+        if labels and date - labels[-1] != timedelta(days=1):
+            raise ParseError('Forecast dates are not consecutive')
+        labels.append(date)
+        try:
+            span = int(cell.attrs.get('colspan', '1'))
+        except ValueError as err:
+            raise ParseError('Invalid forecast date span') from err
+        if span < 1:
+            raise ParseError('Invalid forecast date span')
+        spans.append(span)
+
+    # An edge date may cover only the "Местное время" label.
+    if len(labels) == len(counts) + 1 and spans[0] == 1:
+        counts.insert(0, 0)
+    elif len(labels) == len(counts) + 1 and spans[-1] == 1:
+        counts.append(0)
+    if not labels or len(labels) != len(counts):
+        raise ParseError('Forecast dates do not match hour rollovers')
+    extras = [span - count for span, count in zip(spans, counts)]
+    if sum(extras) != 2 or extras[0] < 1 or any(x < 0 or x > 2 for x in extras):
+        raise ParseError('Forecast date spans do not match hours')
+    dates = [date for date, count in zip(labels, counts) for _ in range(count)]
+    times = [date.replace(hour=h) for date, h in zip(dates, clocks)]
+    if abs((times[0] - fetched_at).total_seconds()) > 86400:
+        raise ParseError('Forecast start is stale or unexpected')
+    return times
+
+
 def parse_forecast(html, offset_seconds, fetched_at):
     root = Tree(html).root
     rows = {}
@@ -215,34 +282,10 @@ def parse_forecast(html, offset_seconds, fetched_at):
     fields['apparent'] = cells('feel-temp-row') if 'feel-temp-row' in rows else [None] * n
     if n < 12 or any(len(v) != n for v in fields.values()):
         raise ParseError('Forecast columns no longer align')
-    tz = timezone(timedelta(seconds=offset_seconds))
-    local_now = fetched_at.astimezone(tz)
-    dates = []
-    previous = None
-    date_cells = cells('forecastDate')
-    for i, cell in enumerate(date_cells):
-        match = re.search(r'(\d{1,2})\s+(' + '|'.join(MONTHS) + r')', cell.text())
-        if not match:
-            raise ParseError('Forecast date is missing')
-        day, month = int(match.group(1)), MONTHS.index(match.group(2)) + 1
-        candidates = [datetime(y, month, day, tzinfo=tz) for y in [local_now.year - 1, local_now.year, local_now.year + 1]]
-        anchor = previous or local_now
-        date = min(candidates, key=lambda x: abs((x - anchor).total_seconds()))
-        if previous and date <= previous:
-            raise ParseError('Forecast dates are not increasing')
-        previous = date
-        count = int(cell.attrs.get('colspan', '1')) - (1 if i == 0 else 0) - (1 if i == len(date_cells) - 1 else 0)
-        dates.extend([date] * count)
-    if len(dates) != n:
-        raise ParseError('Forecast date spans do not match hours')
+    times = forecast_times(hours, cells('forecastDate'), offset_seconds, fetched_at)
     result = []
     for i, hour in enumerate(hours):
-        h = number(hour.text())
-        if h is None or int(h) != h or not 0 <= h <= 23:
-            raise ParseError('Invalid forecast hour')
-        dt = dates[i].replace(hour=int(h))
-        if result and dt <= datetime.fromisoformat(result[-1]['datetime']):
-            raise ParseError('Forecast timestamps are not increasing')
+        dt = times[i]
         temp = cell_number(fields['temperature'][i], 't_0')
         if temp is None or not -90 <= temp <= 65:
             raise ParseError('Invalid forecast temperature')
@@ -252,13 +295,7 @@ def parse_forecast(html, offset_seconds, fetched_at):
         cloud = first(fields['cloud'][i], cls='cc_0')
         rain = first(fields['precipitation'][i], cls='pr_0')
         cloud_text, rain_text = tooltip(cloud) if cloud else '', tooltip(rain) if rain else ''
-        if i:
-            duration = (dt - datetime.fromisoformat(result[-1]['datetime'])).total_seconds() / 3600
-        else:
-            next_hour = number(hours[1].text())
-            if next_hour is None or int(next_hour) != next_hour or not 0 <= next_hour <= 23:
-                raise ParseError('Invalid forecast hour')
-            duration = (dates[1].replace(hour=int(next_hour)) - dt).total_seconds() / 3600
+        duration = ((dt - times[i - 1]) if i else (times[1] - dt)).total_seconds() / 3600
         item = {'datetime': dt.astimezone(timezone.utc).isoformat(), 'native_temperature': temp,
                 'native_apparent_temperature': apparent, 'native_pressure': cell_number(fields['pressure'][i], 'p_3'),
                 'native_wind_speed': cell_number(fields['wind'][i], 'wv_0'),
@@ -268,8 +305,6 @@ def parse_forecast(html, offset_seconds, fetched_at):
                 'condition': condition(cloud_text, rain_text, 'd' in hour.attrs.get('class', ''))}
         item.update(precipitation(fields['precipitation'][i], dt, duration))
         result.append({k: v for k, v in item.items() if v is not None})
-    if abs((datetime.fromisoformat(result[0]['datetime']) - fetched_at).total_seconds()) > 86400:
-        raise ParseError('Forecast start is stale or unexpected')
     return result
 
 

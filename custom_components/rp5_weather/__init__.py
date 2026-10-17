@@ -22,12 +22,22 @@ class RP5Coordinator(DataUpdateCoordinator):
         super().__init__(hass, _LOGGER, name='RP5 Weather', config_entry=entry,
                          update_interval=timedelta(minutes=entry.options.get(CONF_INTERVAL, DEFAULT_INTERVAL)))
         self.client = RP5Client(async_get_clientsession(hass), entry.data[CONF_URL])
+        self._partial_errors = {}
 
     async def _async_update_data(self):
         try:
-            return await self.client.fetch()
+            data = await self.client.fetch(allow_partial=True)
         except (aiohttp.ClientError, TimeoutError, ParseError) as err:
             raise UpdateFailed(str(err)) from err
+        for name in ('forecast', 'observation'):
+            error = data.get(f'{name}_error')
+            previous = self._partial_errors.get(name)
+            if error and error != previous:
+                _LOGGER.warning('RP5 %s unavailable; keeping the other data source: %s', name, error)
+            elif previous and not error:
+                _LOGGER.info('RP5 %s recovered', name)
+            self._partial_errors[name] = error
+        return data
 
 
 async def async_setup_entry(hass, entry):

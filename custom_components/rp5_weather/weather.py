@@ -59,6 +59,9 @@ class RP5Weather(CoordinatorEntity, WeatherEntity):
     @property
     def extra_state_attributes(self):
         return {'observation_available': bool(self.current),
+                'forecast_available': bool(self.coordinator.data['forecast']),
+                'forecast_error': self.coordinator.data.get('forecast_error'),
+                'observation_error': self.coordinator.data.get('observation_error'),
                 'source_url': self.coordinator.data['source_url'],
                 'data_fetched_at': self.coordinator.data['fetched_at'],
                 'observation_time_approx': self.current.get('observed_at_approx'),
