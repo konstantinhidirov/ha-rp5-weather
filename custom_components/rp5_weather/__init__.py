@@ -9,8 +9,8 @@ from homeassistant.const import Platform
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .client import RP5Client
-from .const import CONF_INTERVAL, CONF_URL, DEFAULT_INTERVAL
+from .client import RP5Client, RP5FetchError
+from .const import CONF_INTERVAL, CONF_URL, DEFAULT_INTERVAL, RETRY_INTERVAL_MINUTES
 from .parser import ParseError
 
 _LOGGER = logging.getLogger(__name__)
@@ -19,16 +19,31 @@ PLATFORMS = [Platform.WEATHER, Platform.SENSOR]
 
 class RP5Coordinator(DataUpdateCoordinator):
     def __init__(self, hass, entry):
+        self._normal_update_interval = timedelta(minutes=entry.options.get(CONF_INTERVAL, DEFAULT_INTERVAL))
         super().__init__(hass, _LOGGER, name='RP5 Weather', config_entry=entry,
-                         update_interval=timedelta(minutes=entry.options.get(CONF_INTERVAL, DEFAULT_INTERVAL)))
+                         update_interval=self._normal_update_interval)
         self.client = RP5Client(async_get_clientsession(hass), entry.data[CONF_URL])
         self._partial_errors = {}
+
+    def _set_retry_interval(self, retry_needed):
+        # Use the coordinator's one existing scheduler, including its unload cleanup.
+        interval = min(self._normal_update_interval, timedelta(minutes=RETRY_INTERVAL_MINUTES)) \
+            if retry_needed else self._normal_update_interval
+        if interval != self.update_interval:
+            self.update_interval = interval
+            if retry_needed:
+                _LOGGER.info('RP5 HTTP 503/504: retrying in %s minutes', interval.total_seconds() / 60)
+            else:
+                _LOGGER.info('RP5 returning to the configured %s-minute update interval',
+                             interval.total_seconds() / 60)
 
     async def _async_update_data(self):
         try:
             data = await self.client.fetch(allow_partial=True)
         except (aiohttp.ClientError, TimeoutError, ParseError) as err:
+            self._set_retry_interval(isinstance(err, RP5FetchError) and err.retryable)
             raise UpdateFailed(str(err)) from err
+        self._set_retry_interval(data.get('retry_needed', False))
         for name in ('forecast', 'observation'):
             error = data.get(f'{name}_error')
             previous = self._partial_errors.get(name)

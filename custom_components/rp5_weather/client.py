@@ -12,6 +12,15 @@ from .parser import ParseError, metadata, normalize_url, observation, parse_fore
 ENDPOINT = 'https://m.rp5.ru/mobile/location/html_forecast.php'
 MAX_BYTES = 2_000_000
 HEADERS = {'User-Agent': 'HomeAssistant-RP5-Weather/0.1', 'Accept-Language': 'ru'}
+RETRY_HTTP_STATUSES = {503, 504}
+
+
+class RP5FetchError(ParseError):
+    """Source failure with an explicit retry classification, not message matching."""
+
+    def __init__(self, message, *, retryable=False):
+        super().__init__(message)
+        self.retryable = retryable
 
 
 async def request_text(session, method, url, *, referer, **kwargs):
@@ -20,7 +29,8 @@ async def request_text(session, method, url, *, referer, **kwargs):
                                timeout=aiohttp.ClientTimeout(total=25),
                                allow_redirects=False, **kwargs) as response:
         if response.status != 200:
-            raise ParseError(f'RP5 returned HTTP {response.status}')
+            raise RP5FetchError(f'RP5 returned HTTP {response.status}',
+                                retryable=response.status in RETRY_HTTP_STATUSES)
         data = bytearray()
         async for part in response.content.iter_chunked(65536):
             data.extend(part)
@@ -55,6 +65,7 @@ class RP5Client:
         page = await self._text('GET', self.url)
         meta = await asyncio.to_thread(metadata, page)
         errors = {}
+        retry_needed = False
         tabs = {}
         for name, tab in [('forecast', 2), ('observation', 0)]:
             try:
@@ -63,6 +74,7 @@ class RP5Client:
                 if not allow_partial:
                     raise
                 errors[name] = str(err) or type(err).__name__
+                retry_needed |= isinstance(err, RP5FetchError) and err.retryable
         fetched_at = datetime.now(timezone.utc)
         forecast = []
         current = None
@@ -77,7 +89,9 @@ class RP5Client:
             current = await asyncio.to_thread(observation, tabs['observation'], tabs.get('forecast', ''),
                                               meta['offset_seconds'], fetched_at)
         if not forecast and not current:
-            raise ParseError('RP5 has no usable forecast or observation: ' + '; '.join(errors.values()))
+            raise RP5FetchError('RP5 has no usable forecast or observation: ' + '; '.join(errors.values()),
+                                retryable=retry_needed)
         return {'location': meta, 'forecast': forecast, 'observation': current,
                 'fetched_at': fetched_at.isoformat(), 'source_url': self.url,
-                'forecast_error': errors.get('forecast'), 'observation_error': errors.get('observation')}
+                'forecast_error': errors.get('forecast'), 'observation_error': errors.get('observation'),
+                'retry_needed': retry_needed}
